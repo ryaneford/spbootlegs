@@ -1,0 +1,17 @@
+{
+  "name": "spbootlegs",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Downloads, renames, and transfers Smashing Pumpkins / Zwan / Billy Corgan solo live-show recordings from archive.org via SPLRA",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "express": "^4.21.0",
+    "node-ssh": "^13.1.0",
+    "webtorrent": "^2.5.1"
+  }
+}

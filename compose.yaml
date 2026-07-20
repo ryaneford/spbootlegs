@@ -1,0 +1,36 @@
+services:
+  spbootlegs:
+    image: ryaneford/spbootlegs:latest
+    container_name: spbootlegs
+    restart: unless-stopped
+    ports:
+      - '3999:3999'
+    volumes:
+      - ./downloads:/ten/streaming/downloads
+      - ./cache:/ten/streaming/cache
+    environment:
+      - PORT=3999
+      # SSH-transfer finished bootlegs to a NAS/server (leave SP_SSH_PASS unset to skip)
+      - SP_SSH_HOST=${SP_SSH_HOST:-192.168.0.101}
+      - SP_SSH_USER=${SP_SSH_USER:-admin}
+      - SP_SSH_PASS=${SP_SSH_PASS:-}
+      - SP_SSH_REMOTE_DIR=${SP_SSH_REMOTE_DIR:-/ten/streaming/downloads}
+      # Recently-added widget + share links from a Navidrome instance (leave ND_PASS unset to skip)
+      - ND_BASE=${ND_BASE:-https://pumpkins.buis2.net/rest}
+      - ND_USER=${ND_USER:-admin}
+      - ND_PASS=${ND_PASS:-}
+      # Identifies requests to the MusicBrainz API per their usage policy
+      - CONTACT_EMAIL=${CONTACT_EMAIL:-}
+      - FLARESOLVERR_URL=http://flaresolverr:8191/v1
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    tmpfs:
+      - /tmp:size=2g
+    environment:
+      - LOG_LEVEL=info

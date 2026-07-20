@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>spbootlegs</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="/favicon-180x180.png">
+  <link rel="stylesheet" href="/css/style.css?v=10">
+</head>
+<body>
+  <header>
+    <h1>spbootlegs</h1>
+    <p class="subtitle">Download, rename &amp; transfer bootlegs from SPLRA <button id="help-btn" class="btn-link" onclick="document.getElementById('help-modal').style.display='flex'">How does this work?</button></p>
+  </header>
+
+  <main>
+    <aside id="sidebar-left">
+      <div class="card">
+        <h2>Links</h2>
+        <div class="links-list">
+          <a href="https://www.splra.org" target="_blank" rel="noopener" class="link-item">
+            <span class="link-icon">&#9833;</span>
+            <div class="link-text">
+              <div class="link-name">SPLRA</div>
+              <div class="link-desc">The Smashing Pumpkins Live Recording Association &mdash; bootleg info &amp; torrents</div>
+            </div>
+          </a>
+          <a href="https://pumpkins.buis2.net" target="_blank" rel="noopener" class="link-item">
+            <span class="link-icon">&#9654;</span>
+            <div class="link-text">
+              <div class="link-name">Pumpkins</div>
+              <div class="link-desc">Navidrome &mdash; stream your collection</div>
+            </div>
+          </a>
+          <a href="https://music.buis2.net" target="_blank" rel="noopener" class="link-item">
+            <span class="link-icon">&#127925;</span>
+            <div class="link-text">
+              <div class="link-name">Music</div>
+              <div class="link-desc">Navidrome &mdash; alternate streaming</div>
+            </div>
+          </a>
+          <a href="https://deathmatch.buis2.net" target="_blank" rel="noopener" class="link-item">
+            <span class="link-icon">&#9876;</span>
+            <div class="link-text">
+              <div class="link-name">Deathmatch</div>
+              <div class="link-desc">Song bracket tournament &mdash; vote for the best track</div>
+            </div>
+          </a>
+          <a href="https://files.buis2.net" target="_blank" rel="noopener" class="link-item">
+            <span class="link-icon">&#128193;</span>
+            <div class="link-text">
+              <div class="link-name">Files</div>
+              <div class="link-desc">File browser &mdash; browse &amp; download server files</div>
+            </div>
+          </a>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-content">
+      <section id="new-job" class="card">
+        <h2>New Download</h2>
+        <form id="job-form">
+          <input type="hidden" id="band-select" value="sp" />
+          <div class="form-group">
+            <label for="splra-url">SPLRA Wiki URL</label>
+            <div class="url-input-wrapper">
+              <input type="url" id="splra-url" placeholder="Paste a SPLRA release page URL..." />
+              <span id="url-status" class="url-status"></span>
+            </div>
+            <small id="url-hint">Only URLs from splra.org are accepted</small>
+          </div>
+
+          <div id="lookup-status" class="lookup-status" style="display:none;"></div>
+
+          <div id="recordings-section" style="display:none;">
+            <h3>Available Recordings</h3>
+            <p class="recordings-hint">Select an audio recording to download:</p>
+            <div id="recordings-list" class="recordings-list"></div>
+          </div>
+
+          <div class="form-group" id="metadata-section" style="display:none;">
+            <h3>Metadata</h3>
+            <div class="form-row">
+              <div>
+                <label for="meta-date">Date</label>
+                <input type="text" id="meta-date" placeholder="YYYY-MM-DD" />
+              </div>
+              <div>
+                <label for="meta-venue">Venue</label>
+                <input type="text" id="meta-venue" placeholder="e.g. Adler Theater" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div>
+                <label for="meta-city">City</label>
+                <input type="text" id="meta-city" placeholder="e.g. Davenport" />
+              </div>
+              <div>
+                <label for="meta-state">State</label>
+                <input type="text" id="meta-state" placeholder="e.g. IA" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div>
+                <label for="meta-source">Source</label>
+                <input type="text" id="meta-source" placeholder="e.g. IEM1, AUD, SBD" />
+              </div>
+              <div></div>
+            </div>
+            <div class="metadata-preview">
+              <div id="suggested-name" class="info-box" style="display:none;">
+                <strong>Directory name:</strong> <span id="name-preview"></span>
+              </div>
+              <div id="cover-preview" class="cover-preview" style="display:none;">
+                <img id="cover-img" src="" alt="Cover art preview" />
+              </div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button type="submit" id="download-btn" class="btn btn-primary" disabled>Start Download</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="jobs-section" class="card">
+        <h2>Download Jobs</h2>
+        <div id="jobs-list">
+          <p class="empty-state">No active downloads. Paste a SPLRA URL above to get started.</p>
+        </div>
+      </section>
+
+      <section id="orphaned-section" class="card" style="display:none;">
+        <h2>Orphaned Downloads</h2>
+        <p class="section-hint">Files in staging with no active job &mdash; transfer them to the server.</p>
+        <div id="orphaned-list"></div>
+      </section>
+    </div>
+
+    <aside id="sidebar-right">
+      <div class="card">
+        <h2>Recently Added</h2>
+        <div id="recent-albums">
+          <p class="empty-state">Loading...</p>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <div id="help-modal" class="modal-overlay" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>How to use spbootlegs</h2>
+        <button class="modal-close" onclick="document.getElementById('help-modal').style.display='none'">&times;</button>
+      </div>
+      <div class="modal-body">
+        <h3>1. Find a bootleg</h3>
+        <p>Paste any of the following into the URL box:</p>
+        <ul>
+          <li><strong>SPLRA release page</strong> &mdash; the main source for bootleg metadata, lineage, and setlists</li>
+          <li><strong>SPLRA tour page</strong> &mdash; lists all surfaced recordings; archive.org links resolved automatically</li>
+          <li><strong>Archive.org details page</strong> &mdash; paste directly; band is detected from the identifier prefix (<code>tsp</code>, <code>zwan</code>, <code>bc</code>)</li>
+        </ul>
+        <p>SPLRA pages are fetched through FlareSolverr to bypass Cloudflare. Video recordings (PRO, AMT, VHS, TV sources and video formats) are automatically rejected.</p>
+
+        <h3>2. Select a recording</h3>
+        <p>On tour pages, audio recordings with archive.org links are clickable. The app checks peer count before letting you start &mdash; if a torrent has zero seeders, the download button is disabled. You can edit band, date, venue, city, state, and source before starting.</p>
+
+        <h3>3. Download</h3>
+        <p>The torrent file is fetched from archive.org and handed to WebTorrent. Progress, speed, and peer count are shown in real time.</p>
+        <p><strong>Stall fallback:</strong> If the torrent gains less than 1% in 5 minutes (common for old archive.org torrents with sparse seeders), it's automatically cancelled and download switches to direct HTTP from archive.org's CDN. Files already fully downloaded by the torrent are skipped. Each file is retried up to 3 times on transient errors.</p>
+
+        <h3>4. Automatic post-download pipeline</h3>
+        <p>Once the download completes (torrent or direct), this pipeline runs in sequence:</p>
+        <ol>
+          <li><strong>Cache</strong> &mdash; raw files are saved to <code>CACHE_DIR</code> for re-processing later without re-downloading</li>
+          <li><strong>Track titles</strong> &mdash; resolved in priority order: archive.org <code>_files.xml</code> &gt; NFO files in the download &gt; SPLRA setlist text</li>
+          <li><strong>Rename</strong> &mdash; directory renamed to <code>Artist - YYYY-MM-DD - Venue - City, ST</code>; files renamed to <code>dXtYY - Track Title.ext</code></li>
+          <li><strong>SHN → FLAC</strong> &mdash; any <code>.shn</code> files are converted via <code>shntool</code> + <code>flac</code></li>
+          <li><strong>Format filter</strong> &mdash; non-audio files and duplicates removed; only the best available format is kept per track</li>
+          <li><strong>Tag</strong> &mdash; ID3/Vorbis tags written locally for MP3/OGG; FLAC files are deferred and tagged remotely via <code>metaflac</code> after transfer (avoids re-copying large files)</li>
+          <li><strong>Cover art</strong> &mdash; <code>folder.png</code> generated with band logo, date, venue, and city</li>
+          <li><strong>Transfer (optional)</strong> &mdash; if <code>SP_SSH_HOST</code> is configured, files are SCP'd to your NAS/server over SSH</li>
+          <li><strong>Verify</strong> &mdash; file sizes compared 1:1 after transfer; local files deleted only if verified</li>
+          <li><strong>Remote tag</strong> &mdash; if transferred, <code>metaflac</code> is called over SSH to write tags directly on the destination</li>
+        </ol>
+
+        <h3>5. Listen (optional)</h3>
+        <p>If you configure <code>ND_BASE</code>/<code>ND_USER</code>/<code>ND_PASS</code>, the right sidebar shows recently-added albums from your Navidrome library and lets you generate share links. This is entirely optional — the downloader works fully without it.</p>
+
+        <h3>Re-processing from cache</h3>
+        <p>The Cache tab shows all raw downloads saved before processing. You can re-process any of them (e.g. to pick up a setlist fix or re-tag) without re-downloading. This runs the full pipeline from rename onward.</p>
+
+        <h3>Orphaned downloads</h3>
+        <p>The Orphaned tab shows directories in <code>DOWNLOAD_DIR</code> that have no associated job. These can be transferred to your NAS/server directly, useful for manually placed files.</p>
+
+        <h3>Bands</h3>
+        <table class="source-table">
+          <tr><td><strong>SP</strong></td><td>The Smashing Pumpkins (default)</td></tr>
+          <tr><td><strong>Zwan</strong></td><td>Detected from <code>zwan</code> identifier prefix</td></tr>
+          <tr><td><strong>BC</strong></td><td>Billy Corgan solo &mdash; detected from <code>bc</code> prefix</td></tr>
+        </table>
+
+        <h3>Source types</h3>
+        <table class="source-table">
+          <tr><td><strong>AUD</strong></td><td>Audience recording</td></tr>
+          <tr><td><strong>SBD</strong></td><td>Soundboard</td></tr>
+          <tr><td><strong>IEM</strong></td><td>In-ear monitor</td></tr>
+          <tr><td><strong>FM</strong></td><td>FM broadcast</td></tr>
+          <tr><td><strong>PRO/AMT/TV</strong></td><td>Video &mdash; automatically rejected</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js?v=19"></script>
+</body>
+</html>
