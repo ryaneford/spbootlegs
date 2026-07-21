@@ -6,6 +6,8 @@ shows from [archive.org](https://archive.org), using
 [SPLRA](https://www.splra.org) (the Smashing Pumpkins Live Recording
 Association) as its metadata/setlist source.
 
+![spbootlegs main screen](screenshot.png)
+
 ## What it does
 
 1. **Paste a SPLRA or archive.org URL** — a release page, a tour page (lists
