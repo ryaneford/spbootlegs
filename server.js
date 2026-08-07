@@ -43,17 +43,34 @@ function logRenameCollisions(result, jobId) {
   }
 }
 
+const DISPLAY_NAME_TO_BAND = {
+  'The Smashing Pumpkins': 'sp',
+  'Zwan': 'zwan',
+  'Billy Corgan': 'bc',
+};
+
+// Inverse of renamer.js's buildDirectoryName(): "<Band> - <date> - <venue> -
+// <city, state> - <source>". Band prefix is optional (older/unrecognized
+// folder names fall back to the pre-band date-first format).
 function parseDirectoryName(dirName) {
   const metadata = {};
   const parts = dirName.split(' - ');
-  if (parts.length >= 1 && /^\d{4}-\d{2}-\d{2}$/.test(parts[0].trim())) {
-    metadata.date = parts[0].trim();
+  let idx = 0;
+
+  if (parts.length > idx && DISPLAY_NAME_TO_BAND[parts[idx].trim()]) {
+    metadata.band = DISPLAY_NAME_TO_BAND[parts[idx].trim()];
+    idx++;
   }
-  if (parts.length >= 2) {
-    metadata.venue = parts[1].trim();
+  if (parts.length > idx && /^\d{4}-\d{2}-\d{2}$/.test(parts[idx].trim())) {
+    metadata.date = parts[idx].trim();
+    idx++;
   }
-  if (parts.length >= 3) {
-    const location = parts[2].trim();
+  if (parts.length > idx) {
+    metadata.venue = parts[idx].trim();
+    idx++;
+  }
+  if (parts.length > idx) {
+    const location = parts[idx].trim();
     const lastComma = location.lastIndexOf(',');
     if (lastComma !== -1) {
       metadata.city = location.substring(0, lastComma).trim();
@@ -61,9 +78,10 @@ function parseDirectoryName(dirName) {
     } else {
       metadata.city = location;
     }
+    idx++;
   }
-  if (parts.length >= 4) {
-    metadata.source = parts.slice(3).join(' - ').trim();
+  if (parts.length > idx) {
+    metadata.source = parts.slice(idx).join(' - ').trim();
   }
   return metadata;
 }
@@ -452,7 +470,7 @@ app.post('/api/check-peers', async (req, res) => {
     let torrentInput = null;
 
     if (identifier) {
-      const url = `https://s3.us.archive.org/${identifier}/${identifier}_archive.torrent`;
+      const url = `https://archive.org/download/${identifier}/${identifier}_archive.torrent`;
       try {
         torrentInput = await fetchTorrentFile(url);
       } catch (err) {
@@ -495,7 +513,7 @@ app.post('/api/jobs', async (req, res) => {
     if (!metadata.band) metadata.band = 'sp';
 
     if (archiveIdentifier) {
-      const archiveTorrentUrl = `https://s3.us.archive.org/${archiveIdentifier}/${archiveIdentifier}_archive.torrent`;
+      const archiveTorrentUrl = `https://archive.org/download/${archiveIdentifier}/${archiveIdentifier}_archive.torrent`;
       try {
         const torrentBuffer = await fetchTorrentFile(archiveTorrentUrl);
         torrentInput = torrentBuffer;
