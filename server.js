@@ -110,6 +110,48 @@ function saveJobs() {
   }
 }
 
+// Shared by runPostDownloadPipeline, the /api/jobs/:id/transfer force-rename
+// branch, and /api/cache/:dirName/reprocess — all three need the same
+// enrich -> track-titles -> rename -> shn2flac -> filter sequence.
+async function prepareAudio(jobId, destDir, metadata, archiveId) {
+  metadata = enrichMetadataFromNfo(metadata, destDir);
+
+  let trackTitles = {};
+  try {
+    trackTitles = await buildTrackTitles(destDir, metadata, archiveId);
+    logJob('INFO', 'track_titles', jobId, `merged ${Object.keys(trackTitles).length} titles (archive+nfo+setlist)`);
+  } catch (e) {
+    logJob('WARN', 'track_titles_failed', jobId, e.message);
+  }
+
+  const renameResult = renameFiles(destDir, metadata, trackTitles);
+  logJob('INFO', 'rename', jobId, `renamed=${renameResult.files.length} files to dir=${renameResult.dirName}`);
+  logRenameCollisions(renameResult, jobId);
+  try { await convertShnToFlac(renameResult.targetDir); logJob('INFO', 'shn2flac', jobId, 'SHN conversion done'); } catch (e) { logJob('ERROR', 'shn2flac_failed', jobId, e.message); }
+  const filterResult = filterAudioFormats(renameResult.targetDir);
+  logJob('INFO', 'filter', jobId, `kept=${filterResult.kept} deleted=${filterResult.deletedCount}`);
+
+  return { metadata, trackTitles, renameResult, filterResult };
+}
+
+// Second half of the pipeline: tag + generate cover art. Split from
+// prepareAudio so callers can bail out first if filtering left no audio files.
+async function tagAndCover(jobId, metadata, trackTitles, renameResult) {
+  const renameMap = {};
+  for (const f of renameResult.files) { renameMap[f.renamed] = f.original; }
+
+  let flacTags = [];
+  try {
+    const tagResult = await tagFiles(renameResult.targetDir, metadata, trackTitles, renameMap);
+    flacTags = tagResult.flacTags || [];
+    logJob('INFO', 'tag', jobId, `tagging done (${flacTags.length} flac deferred to NAS)`);
+  } catch (e) { logJob('ERROR', 'tag_failed', jobId, e.message); }
+
+  try { await generateCover(metadata, renameResult.targetDir); logJob('INFO', 'cover', jobId, 'cover generated'); } catch (e) { logJob('ERROR', 'cover_failed', jobId, e.message); }
+
+  return { flacTags };
+}
+
 async function runPostDownloadPipeline(job) {
   try {
     const cachePath = path.join(CACHE_DIR, job.dirName);
@@ -123,32 +165,15 @@ async function runPostDownloadPipeline(job) {
   const archiveId = job.metadata.archiveIdentifier
     || (job.metadata.archiveLinks && job.metadata.archiveLinks.length > 0 ? job.metadata.archiveLinks[0].identifier : null);
 
-  job.metadata = enrichMetadataFromNfo(job.metadata, job.destDir);
+  const { metadata, trackTitles, renameResult, filterResult } = await prepareAudio(job.id, job.destDir, job.metadata, archiveId);
+  job.metadata = metadata;
+  job.renameResult = renameResult;
+  job.filterResult = filterResult;
 
-  let trackTitles = {};
-  try {
-    trackTitles = await buildTrackTitles(job.destDir, job.metadata, archiveId);
-    logJob('INFO', 'track_titles', job.id, `merged ${Object.keys(trackTitles).length} titles (archive+nfo+setlist)`);
-  } catch (e) {
-    logJob('WARN', 'track_titles_failed', job.id, e.message);
-  }
-
-  const result = renameFiles(job.destDir, job.metadata, trackTitles);
-  job.renameResult = result;
-  logJob('INFO', 'rename', job.id, `renamed=${result.files.length} files to dir=${result.dirName}`);
-  logRenameCollisions(result, job.id);
-  try { await convertShnToFlac(result.targetDir); logJob('INFO', 'shn2flac', job.id, 'SHN conversion done'); } catch (e) { logJob('ERROR', 'shn2flac_failed', job.id, e.message); }
-  job.filterResult = filterAudioFormats(result.targetDir);
-  logJob('INFO', 'filter', job.id, `kept=${job.filterResult.kept} deleted=${job.filterResult.deletedCount}`);
-  const renameMap = {};
-  for (const f of result.files) { renameMap[f.renamed] = f.original; }
-  try {
-    const tagResult = await tagFiles(result.targetDir, job.metadata, trackTitles, renameMap);
-    job.flacTags = tagResult.flacTags || [];
-    logJob('INFO', 'tag', job.id, `tagging done (${job.flacTags.length} flac deferred to NAS)`);
-  } catch (e) { logJob('ERROR', 'tag_failed', job.id, e.message); }
+  const { flacTags } = await tagAndCover(job.id, job.metadata, trackTitles, renameResult);
+  job.flacTags = flacTags;
   saveJobs();
-  try { await generateCover(job.metadata, result.targetDir); logJob('INFO', 'cover', job.id, 'cover generated'); } catch (e) { logJob('ERROR', 'cover_failed', job.id, e.message); }
+
   startTransfer(job);
 }
 
@@ -574,47 +599,15 @@ app.post('/api/jobs', async (req, res) => {
   }
 });
 
-app.get('/api/jobs', (req, res) => {
-  const result = [];
-  for (const [id, job] of jobs) {
-    const isDirect = job.downloadMode === 'direct';
-    const progress = isDirect ? null : downloader.getProgress(id);
-    const dp = job.directProgress || null;
-    result.push({
-      id: job.id,
-      magnetURI: job.magnetURI,
-      splraUrl: job.splraUrl,
-      metadata: job.metadata,
-      dirName: job.dirName,
-      status: job.status,
-      downloadMode: job.downloadMode || 'torrent',
-      progress: isDirect ? (dp ? dp.percent : 0) : (progress ? progress.progress : 0),
-      downloadSpeed: isDirect ? 0 : (progress ? progress.downloadSpeed : 0),
-      numPeers: isDirect ? 0 : (progress ? progress.numPeers : 0),
-      done: isDirect ? false : (progress ? progress.done : false),
-      stalledMs: isDirect ? 0 : (progress ? (progress.stalledMs || 0) : 0),
-      directProgress: dp,
-      transferResult: job.transferResult,
-      transferError: job.transferError,
-      transferProgress: job.transferProgress,
-      transferStartedAt: job.transferStartedAt || null,
-      renameResult: job.renameResult,
-      filterResult: job.filterResult || null,
-      localDeleted: job.localDeleted,
-      localDeleteError: job.localDeleteError,
-    });
-  }
-  res.json(result);
-});
-
-app.get('/api/jobs/:id', (req, res) => {
-  const job = jobs.get(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Job not found' });
-
+// Shared by GET /api/jobs and GET /api/jobs/:id — same job-state-to-JSON
+// mapping, just one job vs. all of them. Union of both routes' old field
+// sets (each route previously omitted a few fields the other included);
+// harmless to include the full set in both responses.
+function serializeJob(job) {
   const isDirect = job.downloadMode === 'direct';
-  const progress = isDirect ? null : downloader.getProgress(req.params.id);
+  const progress = isDirect ? null : downloader.getProgress(job.id);
   const dp = job.directProgress || null;
-  res.json({
+  return {
     id: job.id,
     magnetURI: job.magnetURI,
     splraUrl: job.splraUrl,
@@ -627,12 +620,27 @@ app.get('/api/jobs/:id', (req, res) => {
     numPeers: isDirect ? 0 : (progress ? progress.numPeers : 0),
     done: isDirect ? false : (progress ? progress.done : false),
     files: isDirect ? [] : (progress ? progress.files : []),
+    stalledMs: isDirect ? 0 : (progress ? (progress.stalledMs || 0) : 0),
     directProgress: dp,
     transferResult: job.transferResult,
     transferError: job.transferError,
     transferProgress: job.transferProgress,
+    transferStartedAt: job.transferStartedAt || null,
     renameResult: job.renameResult,
-  });
+    filterResult: job.filterResult || null,
+    localDeleted: job.localDeleted,
+    localDeleteError: job.localDeleteError,
+  };
+}
+
+app.get('/api/jobs', (req, res) => {
+  res.json([...jobs.values()].map(serializeJob));
+});
+
+app.get('/api/jobs/:id', (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(serializeJob(job));
 });
 
 app.post('/api/jobs/:id/transfer', async (req, res) => {
@@ -652,28 +660,16 @@ app.post('/api/jobs/:id/transfer', async (req, res) => {
       logJob('INFO', 'force_rename', job.id, `dir=${job.destDir}`);
       const archiveId0 = job.metadata.archiveIdentifier
         || (job.metadata.archiveLinks && job.metadata.archiveLinks.length > 0 ? job.metadata.archiveLinks[0].identifier : null);
-      job.metadata = enrichMetadataFromNfo(job.metadata, job.destDir);
-      let trackTitles = {};
-      try { trackTitles = await buildTrackTitles(job.destDir, job.metadata, archiveId0); } catch {}
-      const result = renameFiles(job.destDir, job.metadata, trackTitles);
-      job.renameResult = result;
-      logJob('INFO', 'rename', job.id, `renamed=${result.files.length} files`);
-      logRenameCollisions(result, job.id);
-      try { await convertShnToFlac(result.targetDir); } catch (e) { logJob('ERROR', 'shn2flac_failed', job.id, e.message); }
-      job.filterResult = filterAudioFormats(result.targetDir);
-      logJob('INFO', 'filter', job.id, `kept=${job.filterResult.kept} deleted=${job.filterResult.deletedCount}`);
-      if (!hasAudioFiles(result.targetDir)) {
+      const { metadata, trackTitles, renameResult, filterResult } = await prepareAudio(job.id, job.destDir, job.metadata, archiveId0);
+      job.metadata = metadata;
+      job.renameResult = renameResult;
+      job.filterResult = filterResult;
+      if (!hasAudioFiles(renameResult.targetDir)) {
         cleanupAndRemove(job);
         return res.status(410).json({ error: 'No audio files found after filtering — job cleared', removed: true });
       }
-      const renameMap2 = {};
-      for (const f of result.files) { renameMap2[f.renamed] = f.original; }
-      try {
-        const tagResult2 = await tagFiles(result.targetDir, job.metadata, trackTitles, renameMap2);
-        job.flacTags = tagResult2.flacTags || [];
-        logJob('INFO', 'tag', job.id, `tagging done (${job.flacTags.length} flac deferred to NAS)`);
-      } catch (e) { logJob('ERROR', 'tag_failed', job.id, e.message); }
-      try { await generateCover(job.metadata, result.targetDir); } catch (e) { logJob('ERROR', 'cover_failed', job.id, e.message); }
+      const { flacTags } = await tagAndCover(job.id, job.metadata, trackTitles, renameResult);
+      job.flacTags = flacTags;
       saveJobs();
     }
     logJob('INFO', 'force_transfer', job.id, `${job.status}→transfer dir=${job.destDir}`);
@@ -894,31 +890,15 @@ app.post('/api/cache/:dirName/reprocess', async (req, res) => {
     return res.status(500).json({ error: `Failed to copy from cache: ${err.message}` });
   }
 
-  let metadata = parseDirectoryName(dirName);
-  const archiveId2 = req.body.archiveIdentifier || metadata.archiveIdentifier;
-  metadata = enrichMetadataFromNfo(metadata, stagingDir);
-  let trackTitles = {};
-  try {
-    trackTitles = await buildTrackTitles(stagingDir, metadata, archiveId2);
-    logJob('INFO', 'track_titles', '-', `merged ${Object.keys(trackTitles).length} titles (archive+nfo+setlist)`);
-  } catch (e) {
-    logJob('WARN', 'track_titles_failed', '-', e.message);
-  }
+  const initialMetadata = parseDirectoryName(dirName);
+  const archiveId2 = req.body.archiveIdentifier || initialMetadata.archiveIdentifier;
 
   try {
-    const result = renameFiles(stagingDir, metadata, trackTitles);
-    logJob('INFO', 'rename', '-', `renamed=${result.files.length} files`);
-    logRenameCollisions(result, '-');
-    try { await convertShnToFlac(result.targetDir); } catch (e) { logJob('ERROR', 'shn2flac_failed', '-', e.message); }
-    const filterResult = filterAudioFormats(result.targetDir);
-    logJob('INFO', 'filter', '-', `kept=${filterResult.kept} deleted=${filterResult.deletedCount}`);
-    if (!hasAudioFiles(result.targetDir)) {
-      return res.status(400).json({ error: 'No audio files found after filtering', renameResult: result });
+    const { metadata, trackTitles, renameResult, filterResult } = await prepareAudio('-', stagingDir, initialMetadata, archiveId2);
+    if (!hasAudioFiles(renameResult.targetDir)) {
+      return res.status(400).json({ error: 'No audio files found after filtering', renameResult });
     }
-    const renameMap = {};
-    for (const f of result.files) { renameMap[f.renamed] = f.original; }
-    try { await tagFiles(result.targetDir, metadata, trackTitles, renameMap); logJob('INFO', 'tag', '-', 'done'); } catch (e) { logJob('ERROR', 'tag_failed', '-', e.message); }
-    try { await generateCover(metadata, result.targetDir); } catch (e) { logJob('ERROR', 'cover_failed', '-', e.message); }
+    await tagAndCover('-', metadata, trackTitles, renameResult);
 
     const jobId = `reprocess-${Date.now()}`;
     const job = {
@@ -933,7 +913,7 @@ app.post('/api/cache/:dirName/reprocess', async (req, res) => {
       transferError: null,
       transferProgress: { phase: 'connecting' },
       transferStartedAt: Date.now(),
-      renameResult: result,
+      renameResult,
       filterResult,
       localDeleted: false,
       localDeleteError: null,
@@ -942,7 +922,7 @@ app.post('/api/cache/:dirName/reprocess', async (req, res) => {
     saveJobs();
     startTransfer(job);
 
-    res.json({ jobId, status: 'processing', message: 'Re-processing from cache', renameResult: result, filterResult });
+    res.json({ jobId, status: 'processing', message: 'Re-processing from cache', renameResult, filterResult });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
