@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import downloader from './lib/downloader.js';
 import { lookup, fetchTorrentFile, fetchArchiveMetadata, fetchArchiveTrackTitles } from './lib/splra.js';
-import { buildDirectoryName, renameFiles, filterAudioFormats, convertShnToFlac, tagFiles, AUDIO_EXTENSIONS, parseNfoFiles, parseSetlistTitles } from './lib/renamer.js';
+import { buildDirectoryName, renameFiles, filterAudioFormats, convertShnToFlac, tagFiles, AUDIO_EXTENSIONS, parseNfoFiles, parseSetlistTitles, BAND_NAMES } from './lib/renamer.js';
 import { transfer, tagFlacOnNas } from './lib/transfer.js';
 import { generateCover } from './lib/cover.js';
 
@@ -43,11 +43,7 @@ function logRenameCollisions(result, jobId) {
   }
 }
 
-const DISPLAY_NAME_TO_BAND = {
-  'The Smashing Pumpkins': 'sp',
-  'Zwan': 'zwan',
-  'Billy Corgan': 'bc',
-};
+const DISPLAY_NAME_TO_BAND = Object.fromEntries(Object.entries(BAND_NAMES).map(([band, name]) => [name, band]));
 
 // Inverse of renamer.js's buildDirectoryName(): "<Band> - <date> - <venue> -
 // <city, state> - <source>". Band prefix is optional (older/unrecognized

@@ -2,11 +2,30 @@ const $ = (sel) => document.querySelector(sel);
 
 const ALLOWED_HOSTS = ['splra.org', 'www.splra.org', 'archive.org', 'www.archive.org'];
 
+const META_FIELDS = ['date', 'venue', 'city', 'state', 'source'];
+
+function getMetaFields() {
+  const out = {};
+  for (const f of META_FIELDS) out[f] = $(`#meta-${f}`).value;
+  return out;
+}
+
+// Only overwrites fields present (and truthy) in `values` — matches the old
+// per-field `if (data.metadata.x) ...` behavior of not clobbering existing input.
+function setMetaFields(values) {
+  for (const f of META_FIELDS) {
+    if (values[f]) $(`#meta-${f}`).value = values[f];
+  }
+}
+
+function clearMetaFields() {
+  for (const f of META_FIELDS) $(`#meta-${f}`).value = '';
+}
+
 let currentMetadata = null;
 let selectedArchiveId = null;
 let selectedReleasePageUrl = null;
 let pollInterval = null;
-let activeTab = 'downloads';
 
 function startPolling(fast) {
   clearInterval(pollInterval);
@@ -53,23 +72,20 @@ function formatDuration(ms) {
 }
 
 function updateNamePreview() {
+  const { date, venue, city, state, source } = getMetaFields();
   const parts = [];
-  if ($('#meta-date').value) parts.push($('#meta-date').value);
-  if ($('#meta-venue').value) parts.push($('#meta-venue').value);
-  const loc = [$('#meta-city').value, $('#meta-state').value].filter(Boolean).join(', ');
+  if (date) parts.push(date);
+  if (venue) parts.push(venue);
+  const loc = [city, state].filter(Boolean).join(', ');
   if (loc) parts.push(loc);
-  if ($('#meta-source').value) parts.push(`[${$('#meta-source').value}]`);
+  if (source) parts.push(`[${source}]`);
   $('#name-preview').textContent = parts.join(' - ') || 'Unknown_Show';
 }
 
 function updateCoverPreview() {
   const qp = new URLSearchParams({
-    date: $('#meta-date').value || '',
-    venue: $('#meta-venue').value || '',
-    city: $('#meta-city').value || '',
-    state: $('#meta-state').value || '',
+    ...getMetaFields(),
     country: (currentMetadata && currentMetadata.country) || '',
-    source: $('#meta-source').value || '',
     band: $('#band-select').value || 'sp',
   });
   $('#cover-img').src = `/api/cover-preview?${qp.toString()}`;
@@ -342,11 +358,7 @@ async function doLookup(url) {
     }
 
     $('#metadata-section').style.display = 'block';
-    if (data.metadata.date) $('#meta-date').value = data.metadata.date;
-    if (data.metadata.venue) $('#meta-venue').value = data.metadata.venue;
-    if (data.metadata.city) $('#meta-city').value = data.metadata.city;
-    if (data.metadata.state) $('#meta-state').value = data.metadata.state;
-    if (data.metadata.source) $('#meta-source').value = data.metadata.source;
+    setMetaFields(data.metadata);
 
     updateNamePreview();
 
@@ -416,8 +428,8 @@ $('#splra-url').addEventListener('paste', (e) => {
   $('#splra-url').dispatchEvent(new Event('input'));
 });
 
-['meta-date', 'meta-venue', 'meta-city', 'meta-state', 'meta-source'].forEach((id) => {
-  $(`#${id}`).addEventListener('input', () => {
+META_FIELDS.forEach((f) => {
+  $(`#meta-${f}`).addEventListener('input', () => {
     if (!currentMetadata) return;
     updateNamePreview();
   });
@@ -442,13 +454,7 @@ $('#job-form').addEventListener('submit', async (e) => {
     return;
   }
 
-  const customMetadata = {};
-  if ($('#meta-date').value) customMetadata.date = $('#meta-date').value;
-  if ($('#meta-venue').value) customMetadata.venue = $('#meta-venue').value;
-  if ($('#meta-city').value) customMetadata.city = $('#meta-city').value;
-  if ($('#meta-state').value) customMetadata.state = $('#meta-state').value;
-  if ($('#meta-source').value) customMetadata.source = $('#meta-source').value;
-  customMetadata.band = $('#band-select').value;
+  const customMetadata = { ...getMetaFields(), band: $('#band-select').value };
 
   const payload = { customMetadata };
   if (selectedReleasePageUrl) {
@@ -491,11 +497,7 @@ function resetForm() {
   $('#splra-url').value = '';
   $('#url-status').className = 'url-status';
   $('#lookup-status').style.display = 'none';
-  $('#meta-date').value = '';
-  $('#meta-venue').value = '';
-  $('#meta-city').value = '';
-  $('#meta-state').value = '';
-  $('#meta-source').value = '';
+  clearMetaFields();
   $('#metadata-section').style.display = 'none';
   $('#suggested-name').style.display = 'none';
   $('#cover-preview').style.display = 'none';
@@ -510,10 +512,7 @@ async function refreshJobs() {
   try {
     const resp = await fetch('/api/jobs');
     const jobs = await resp.json();
-    const torrentJobs = jobs.filter(j => j.source !== 'upload');
-    const uploadJobs = jobs.filter(j => j.source === 'upload');
-    renderJobs(torrentJobs, '#jobs-list', 'No active downloads. Paste a URL above to get started.');
-    renderJobs(uploadJobs, '#upload-jobs-list', 'No upload jobs yet. Drop a .zip or place files in the NAS upload zone.');
+    renderJobs(jobs, '#jobs-list', 'No active downloads. Paste a URL above to get started.');
   } catch (_) {}
 }
 
@@ -557,24 +556,13 @@ function renderPipeline(job) {
 
   let steps;
   if (job.status === 'downloading' || job.status === 'renamed') {
-    if (job.source === 'upload') {
-      const up = job.uploadProgress;
-      if (up && up.phase !== 'processing') {
-        steps = ['active', 'pending', 'pending', 'pending', 'pending'];
-      } else if (!job.renameResult) {
-        steps = ['done', 'active', 'pending', 'pending', 'pending'];
-      } else {
-        steps = ['done', 'done', 'active', 'pending', 'pending'];
-      }
+    const directDone = job.downloadMode === 'direct' && job.directProgress && job.directProgress.phase === 'done';
+    if (!directDone && pct < 0.99 && !isDone) {
+      steps = ['active', 'pending', 'pending', 'pending', 'pending'];
+    } else if (!job.renameResult) {
+      steps = ['done', 'active', 'pending', 'pending', 'pending'];
     } else {
-      const directDone = job.downloadMode === 'direct' && job.directProgress && job.directProgress.phase === 'done';
-      if (!directDone && pct < 0.99 && !isDone) {
-        steps = ['active', 'pending', 'pending', 'pending', 'pending'];
-      } else if (!job.renameResult) {
-        steps = ['done', 'active', 'pending', 'pending', 'pending'];
-      } else {
-        steps = ['done', 'done', 'active', 'pending', 'pending'];
-      }
+      steps = ['done', 'done', 'active', 'pending', 'pending'];
     }
   } else if (job.status === 'transferring') {
     steps = ['done', 'done', 'done', 'active', 'pending'];
@@ -604,28 +592,7 @@ function renderPipeline(job) {
   let detail = '';
 
   if (job.status === 'downloading' || job.status === 'renamed') {
-    if (job.source === 'upload') {
-      const up = job.uploadProgress;
-      if (up && up.phase === 'connecting') {
-        detail = `<div class="pipeline-detail pd-spinner-row">Connecting to NAS&hellip;</div>`;
-      } else if (up && up.phase === 'extracting') {
-        detail = `<div class="pipeline-detail pd-spinner-row">Extracting <em>${up.currentFile || ''}</em>&hellip;</div>`;
-      } else if (up && up.phase === 'downloading') {
-        const count = up.downloadedFiles > 0 ? `${up.downloadedFiles} file${up.downloadedFiles !== 1 ? 's' : ''} downloaded` : '';
-        detail = `<div class="pipeline-detail">
-          <div class="pd-fallback-notice">Downloading from NAS upload zone <span class="pd-badge pd-badge-ok">upload</span></div>
-          ${up.currentFile ? `<div class="pd-current-file">${up.currentFile}</div>` : ''}
-          ${count ? `<div class="pd-stats"><span>${count}</span></div>` : ''}
-        </div>`;
-      } else {
-        if (!job.renameResult) {
-          detail = `<div class="pipeline-detail pd-spinner-row">Renaming files&hellip;</div>`;
-        } else {
-          const rName = job.renameResult.targetDir ? job.renameResult.targetDir.split('/').pop() : '';
-          detail = `<div class="pipeline-detail pd-spinner-row">Generating cover art${rName ? ` &mdash; <em>${rName}</em>` : ''}&hellip;</div>`;
-        }
-      }
-    } else if (job.downloadMode === 'direct' && job.directProgress) {
+    if (job.downloadMode === 'direct' && job.directProgress) {
       const dp = job.directProgress;
       if (dp.phase === 'starting') {
         detail = `<div class="pipeline-detail pd-spinner-row">No peers found — fetching file list from archive.org…</div>`;
@@ -760,12 +727,10 @@ function renderJobs(jobs, containerSel, emptyMsg) {
       actions = `<button class="btn btn-small btn-danger" onclick="cancelJob('${job.id}')">Cancel</button>`;
     }
 
-    const srcBadge = job.source === 'upload' ? '<span class="pd-badge pd-badge-ok" style="margin-right:0.4rem;vertical-align:middle;">upload</span>' : '';
-    const mbBadge = job.mbMatch ? `<a href="${job.mbMatch.url}" target="_blank" rel="noopener" class="pd-badge pd-badge-mb" title="${job.mbMatch.title}">MB</a>` : '';
     return `
     <div class="job-item" data-id="${job.id}">
       <div class="job-header">
-        <span class="job-name">${srcBadge}${mbBadge}${job.dirName || job.id}</span>
+        <span class="job-name">${job.dirName || job.id}</span>
       </div>
       <div class="job-meta">
         ${job.metadata.date ? `<span>${job.metadata.date}</span>` : ''}
@@ -782,40 +747,37 @@ function renderJobs(jobs, containerSel, emptyMsg) {
   }
 }
 
-async function dismissJob(id) {
+// Shared by the simple fetch-then-toast-then-refresh action handlers below.
+// retryTransfer() is NOT built on this — it needs to inspect the response
+// body (the `removed` case) before deciding whether it succeeded.
+async function runAction(url, { method = 'POST', confirmMsg, successMsg, successType = 'info', after = [], errorPrefix } = {}) {
+  if (confirmMsg && !confirm(confirmMsg)) return;
   try {
-    const resp = await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
+    const resp = await fetch(url, { method });
     if (!resp.ok) throw new Error((await resp.json()).error);
-    refreshJobs();
-    refreshOrphaned();
+    if (successMsg) showToast(successMsg, successType);
+    after.forEach((fn) => fn());
   } catch (err) {
-    showToast(`Dismiss failed: ${err.message}`, 'error');
+    showToast(`${errorPrefix} failed: ${err.message}`, 'error');
   }
 }
 
-async function resumeDownload(id) {
-  try {
-    const resp = await fetch(`/api/jobs/${id}/resume`, { method: 'POST' });
-    if (!resp.ok) throw new Error((await resp.json()).error);
-    showToast('Resuming download...', 'info');
-    refreshJobs();
-    startPolling(true);
-  } catch (err) {
-    showToast(`Resume failed: ${err.message}`, 'error');
-  }
+function dismissJob(id) {
+  return runAction(`/api/jobs/${id}`, { method: 'DELETE', after: [refreshJobs, refreshOrphaned], errorPrefix: 'Dismiss' });
 }
 
-async function cancelJob(id) {
-  if (!confirm('Cancel this download and discard any downloaded data?')) return;
-  try {
-    const resp = await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
-    if (!resp.ok) throw new Error((await resp.json()).error);
-    showToast('Download cancelled', 'info');
-    refreshJobs();
-    refreshOrphaned();
-  } catch (err) {
-    showToast(`Cancel failed: ${err.message}`, 'error');
-  }
+function resumeDownload(id) {
+  return runAction(`/api/jobs/${id}/resume`, { successMsg: 'Resuming download...', after: [refreshJobs, () => startPolling(true)], errorPrefix: 'Resume' });
+}
+
+function cancelJob(id) {
+  return runAction(`/api/jobs/${id}`, {
+    method: 'DELETE',
+    confirmMsg: 'Cancel this download and discard any downloaded data?',
+    successMsg: 'Download cancelled',
+    after: [refreshJobs, refreshOrphaned],
+    errorPrefix: 'Cancel',
+  });
 }
 
 async function retryTransfer(id) {
@@ -911,21 +873,13 @@ function renderOrphaned(dirs) {
     </div>`).join('');
 }
 
-window.transferOrphaned = async function(dirName) {
-  try {
-    const resp = await fetch(`/api/orphaned/${encodeURIComponent(dirName)}/transfer`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error);
-    showToast(`Transfer started: ${dirName}`, 'success');
-    refreshOrphaned();
-    refreshJobs();
-    startPolling(true);
-  } catch (err) {
-    showToast(`Transfer failed: ${err.message}`, 'error');
-  }
+window.transferOrphaned = function(dirName) {
+  return runAction(`/api/orphaned/${encodeURIComponent(dirName)}/transfer`, {
+    successMsg: `Transfer started: ${dirName}`,
+    successType: 'success',
+    after: [refreshOrphaned, refreshJobs, () => startPolling(true)],
+    errorPrefix: 'Transfer',
+  });
 };
 
 refreshJobs();
@@ -937,5 +891,4 @@ startPolling(false);
 
 window.addEventListener('DOMContentLoaded', () => {
   $('#splra-url').value = '';
-  initUploadDropZone();
 });
